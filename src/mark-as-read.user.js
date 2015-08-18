@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           GitHub: Mark as Read
-// @version        0.1.0
+// @version        0.1.1
 // @description    Adds a "Mark as Read" toggle to PRs and Issues
 // @match          https://github.com/*
 // ==/UserScript==
@@ -89,6 +89,15 @@ injectStyles(
     observer.observe(pjaxContainer, {childList: true});
   }
 
+  function hashItem(timeISO, commentCount) {
+    return JSON.stringify([timeISO, commentCount]);
+  }
+
+  function isItemRead(readItems, itemID, timeISO, commentCount) {
+    var hash = hashItem(timeISO, commentCount);
+    return readItems[itemID] && readItems[itemID] === hash;
+  }
+
   function flushStorageToView() {
     var readItems = ScriptStorage.get('github-read');
 
@@ -106,12 +115,19 @@ injectStyles(
       if (time) {
         timeISO = time.getAttribute('datetime');
       }
+      var commentCount;
+      var commentCell = $('.issue-comments', item);
+      if (commentCell) {
+        commentCount = commentCell.textContent.trim();
+      }
       var metaRow = $('.issue-meta', item);
 
-      if (!itemID || !timeISO || !metaRow) {
+      if (itemID == null ||
+          timeISO == null ||
+          metaRow == null) {
         return;
       }
-      var isRead = readItems[itemID] && readItems[itemID] === timeISO;
+      var isRead = isItemRead(readItems, itemID, timeISO, commentCount);
 
       var readButton = $('.read-button', item);
       if (!readButton) {
@@ -126,7 +142,7 @@ injectStyles(
 
         readButton.addEventListener('click', function(event) {
           event.preventDefault();
-          handleItemClick(itemID, timeISO);
+          handleItemClick(itemID, timeISO, commentCount);
         }, false);
       }
 
@@ -140,12 +156,12 @@ injectStyles(
     });
   }
 
-  function handleItemClick(itemID, timeISO) {
+  function handleItemClick(itemID, timeISO, commentCount) {
     var readItems = ScriptStorage.get('github-read');
-    if (readItems[itemID] && readItems[itemID] === timeISO) {
+    if (isItemRead(readItems, itemID, timeISO, commentCount)) {
       delete readItems[itemID];
     } else {
-      readItems[itemID] = timeISO;
+      readItems[itemID] = hashItem(timeISO, commentCount);
     }
     ScriptStorage.set('github-read', readItems);
     flushStorageToView();
