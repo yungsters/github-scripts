@@ -14,12 +14,18 @@ function getConfig() {
 }
 
 function getUser() {
-  if (window.location.hash.length > 1) {
-    return window.location.hash.substr(1);
-  }
   var avatar = document.querySelector('.user-nav .avatar');
   if (avatar) {
-    return avatar.alt.substr(1); // @username
+    var name = avatar.alt.substr(1); // @username
+    var fragment = window.location.hash.substr(1);
+    if (fragment[0] === '@') {
+      // For testing purposes.
+      name = fragment.substr(1);
+    }
+    return {
+      name: name,
+      avatar: avatar.src
+    };
   }
   return null;
 }
@@ -56,7 +62,7 @@ function addNavigationListener(callback) {
 function getSessions(currentUser, path) {
   return getConfig().then(function(config) {
     var query = new Parse.Query(Session);
-    query.notEqualTo('user', currentUser);
+    query.notEqualTo('user', currentUser.name);
     query.equalTo('path', path);
     query.greaterThan(
       'updatedAt',
@@ -66,7 +72,8 @@ function getSessions(currentUser, path) {
       var userMap = {};
       sessions.forEach(function(session) {
         userMap[session.get('user')] = {
-          name: session.get('user')
+          name: session.get('user'),
+          avatar: session.get('avatar')
         };
       });
       return userMap;
@@ -87,6 +94,7 @@ function renderSessions(sessions) {
     // <div class="discussion-item js-details-container">
     //   <div class="discussion-item-header">
     //     <span class="octicon octicon-eye discussion-item-icon"></span>
+    //     <img alt="..." class="avatar" height="16" src="..." width="16">
     //     <a href="/username" class="author">username</a>
     //     {', '}
     //     ...
@@ -120,12 +128,28 @@ function renderSessions(sessions) {
       sessionUser.href = '/' + user;
       sessionUser.appendChild(document.createTextNode(user));
 
+      var sessionUserIcon;
+      var sessionUserAvatar = sessions[user].avatar;
+      if (sessionUserAvatar) {
+        sessionUserIcon = document.createElement('img');
+        sessionUserIcon.className = 'avatar';
+        sessionUserIcon.alt = '@' + user;
+        sessionUserIcon.height = 16;
+        sessionUserIcon.width = 16;
+        sessionUserIcon.src = sessionUserAvatar;
+        sessionUserIcon.style.cssFloat = 'none';
+        sessionUserIcon.style.marginTop = '-1px';
+      }
+
       if (ii > 0) {
         if (ii < users.length - 1) {
           sessionHeader.appendChild(document.createTextNode(', '));
         } else {
           sessionHeader.appendChild(document.createTextNode(' and '));
         }
+      }
+      if (sessionUserIcon) {
+        sessionHeader.appendChild(sessionUserIcon);
       }
       sessionHeader.appendChild(sessionUser);
     });
@@ -152,25 +176,32 @@ function main() {
     return;
   }
   var session = new Session();
+  var sessionSave = function(path) {
+    session.save({
+      user: user.name,
+      avatar: user.avatar,
+      path: path
+    });
+  };
   var initialPath = getPath();
 
   // Keep Parse up-to-date with the current path.
 
-  session.save({user: user, path: initialPath});
+  sessionSave(initialPath);
 
   addNavigationListener(function() {
-    session.save({user: user, path: getPath()});
+    sessionSave(getPath());
   });
 
   window.addEventListener('beforeunload', function() {
-    session.save({user: user, path: null});
+    sessionSave(null);
   }, false);
 
   getConfig().then(function(config) {
     setInterval(function() {
       var path = getPath();
       if (path) {
-        session.save({user: user, path: path});
+        sessionSave(path);
       }
     }, config.sessionTimeout - config.networkLatency);
   });
