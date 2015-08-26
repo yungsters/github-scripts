@@ -225,8 +225,8 @@ function renderSessions(sessions) {
     icon: 'eye',
     getMessage: function(sessions) {
       return sessions.length === 1 ?
-        ' is reading this' :
-        ' are reading this';
+        ' is on this page' :
+        ' are on this page';
     }
   });
   renderContainer(writing, {
