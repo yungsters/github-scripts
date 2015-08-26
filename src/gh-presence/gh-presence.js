@@ -1,10 +1,17 @@
 Parse.initialize('APPLICATION_ID', 'JAVASCRIPT_KEY');
 
-var SESSION_TIMEOUT = 60 * 1000;
-var NETWORK_LATENCY = 5 * 1000;
-var UPDATE_INTERVAL = 5 * 1000;
-
 var Session = Parse.Object.extend('Session');
+
+var _config;
+function getConfig() {
+  return _config = _config || Parse.Config.get().then(function(config) {
+    return {
+      sessionTimeout: config.get('sessionTimeout') * 1000,
+      networkLatency: config.get('networkLatency') * 1000,
+      updateInterval: config.get('updateInterval') * 1000
+    };
+  });
+}
 
 function getUser() {
   if (window.location.hash.length > 1) {
@@ -47,16 +54,23 @@ function addNavigationListener(callback) {
 }
 
 function getSessions(currentUser, path) {
-  var query = new Parse.Query(Session);
-  query.notEqualTo('user', currentUser);
-  query.equalTo('path', getPath());
-  query.greaterThan('updatedAt', new Date(Date.now() - SESSION_TIMEOUT));
-  return query.find().then(function(sessions) {
-    var userMap = {};
-    sessions.forEach(function(session) {
-      userMap[session.get('user')] = session;
+  return getConfig().then(function(config) {
+    var query = new Parse.Query(Session);
+    query.notEqualTo('user', currentUser);
+    query.equalTo('path', path);
+    query.greaterThan(
+      'updatedAt',
+      new Date(Date.now() - config.sessionTimeout)
+    );
+    return query.find().then(function(sessions) {
+      var userMap = {};
+      sessions.forEach(function(session) {
+        userMap[session.get('user')] = {
+          name: session.get('user')
+        };
+      });
+      return userMap;
     });
-    return userMap;
   });
 }
 
@@ -144,13 +158,6 @@ function main() {
 
   session.save({user: user, path: initialPath});
 
-  setInterval(function() {
-    var path = getPath();
-    if (path) {
-      session.save({user: user, path: path});
-    }
-  }, SESSION_TIMEOUT - NETWORK_LATENCY);
-
   addNavigationListener(function() {
     session.save({user: user, path: getPath()});
   });
@@ -159,22 +166,29 @@ function main() {
     session.save({user: user, path: null});
   }, false);
 
+  getConfig().then(function(config) {
+    setInterval(function() {
+      var path = getPath();
+      if (path) {
+        session.save({user: user, path: path});
+      }
+    }, config.sessionTimeout - config.networkLatency);
+  });
+
   // Display a list of users on the current path.
 
   if (initialPath) {
-    getSessions(user, initialPath).then(function(sessions) {
-      renderSessions(sessions);
-    });
+    getSessions(user, initialPath).then(renderSessions);
   }
 
-  setInterval(function() {
-    var path = getPath();
-    if (path) {
-      getSessions(user, path).then(function(sessions) {
-        renderSessions(sessions);
-      });
-    }
-  }, UPDATE_INTERVAL);
+  getConfig().then(function(config) {
+    setInterval(function() {
+      var path = getPath();
+      if (path) {
+        getSessions(user, path).then(renderSessions);
+      }
+    }, config.updateInterval);
+  });
 }
 
 main();
