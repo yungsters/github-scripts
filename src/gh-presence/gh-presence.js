@@ -40,6 +40,27 @@ function getPath() {
   return null;
 }
 
+function getCommentField() {
+  return document.getElementById('new_comment_field');
+}
+
+function isTyping() {
+  var commentField = getCommentField();
+  return commentField ? commentField.value.trim().length > 0 : false;
+}
+
+function debounce(callback, delay) {
+  var timeout;
+  return function() {
+    clearTimeout(timeout);
+    var args = arguments;
+    var context = this;
+    timeout = setTimeout(function() {
+      callback.apply(context, args);
+    }, delay);
+  };
+}
+
 function addNavigationListener(callback) {
   var pjaxContainer = document.getElementById('js-repo-pjax-container');
   if (pjaxContainer) {
@@ -69,105 +90,159 @@ function getSessions(currentUser, path) {
       new Date(Date.now() - config.sessionTimeout)
     );
     return query.find().then(function(sessions) {
-      var userMap = {};
+      var sessionsByUser = {};
       sessions.forEach(function(session) {
-        userMap[session.get('user')] = {
-          name: session.get('user'),
-          avatar: session.get('avatar')
+        sessionsByUser[session.get('user')] = {
+          user: session.get('user'),
+          avatar: session.get('avatar'),
+          isTyping: session.get('isTyping')
         };
       });
-      return userMap;
+      return Object.keys(sessionsByUser).map(function(user) {
+        return sessionsByUser[user];
+      });
     });
   });
 }
 
-function renderSessions(sessions) {
+/**
+ * <div class="discussion-item js-details-container">
+ *   <div class="discussion-item-header">
+ *     <span class="octicon octicon-eye discussion-item-icon"></span>
+ *     <img alt="..." class="avatar" height="16" src="..." width="16">
+ *     <a href="/username" class="author">username</a>
+ *     {', '}
+ *     ...
+ *   </div>
+ * </div>
+ */
+function renderContainer(sessions, containerConfig) {
   var discussion = document.querySelector('.js-discussion');
   if (!discussion) {
     console.error('Unable to find `#js-discussion`.');
     return;
   }
 
-  var sessionContainerID = 'gh-presence-container';
-  var sessionContainer = document.getElementById(sessionContainerID);
-  if (!sessionContainer) {
-    // <div class="discussion-item js-details-container">
-    //   <div class="discussion-item-header">
-    //     <span class="octicon octicon-eye discussion-item-icon"></span>
-    //     <img alt="..." class="avatar" height="16" src="..." width="16">
-    //     <a href="/username" class="author">username</a>
-    //     {', '}
-    //     ...
-    //   </div>
-    // </div>
-    sessionContainer = document.createElement('div');
-    sessionContainer.className = 'discussion-item js-details-container';
-    sessionContainer.id = sessionContainerID;
+  var container = document.getElementById(containerConfig.id);
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'discussion-item js-details-container';
+    container.id = containerConfig.id;
 
     var sessionHeader = document.createElement('div');
     sessionHeader.className = 'discussion-item-header';
 
-    sessionContainer.appendChild(sessionHeader);
+    container.appendChild(sessionHeader);
   }
 
-  var sessionHeader = sessionContainer.firstChild;
+  var sessionHeader = container.firstChild;
   var sessionHeaderChild;
   while (sessionHeaderChild = sessionHeader.firstChild) {
     sessionHeader.removeChild(sessionHeaderChild);
   }
 
-  var users = Object.keys(sessions);
-  if (users.length) {
+  if (sessions.length) {
     var sessionIcon = document.createElement('span');
-    sessionIcon.className = 'octicon octicon-eye discussion-item-icon';
+    sessionIcon.className =
+      // Yes, string concatenation; go ahead and puke.
+      'octicon octicon-' + containerConfig.icon + ' discussion-item-icon';
+    if (containerConfig.iconStyle) {
+      Object.keys(containerConfig.iconStyle).forEach(function(styleName) {
+        sessionIcon.style[styleName] = containerConfig.iconStyle[styleName];
+      });
+    }
     sessionHeader.appendChild(sessionIcon);
 
-    users.forEach(function(user, ii) {
-      var sessionUser = document.createElement('a');
-      sessionUser.className = 'author';
-      sessionUser.href = '/' + user;
-      sessionUser.appendChild(document.createTextNode(user));
-
-      var sessionUserIcon;
-      var sessionUserAvatar = sessions[user].avatar;
-      if (sessionUserAvatar) {
-        sessionUserIcon = document.createElement('img');
-        sessionUserIcon.className = 'avatar';
-        sessionUserIcon.alt = '@' + user;
-        sessionUserIcon.height = 16;
-        sessionUserIcon.width = 16;
-        sessionUserIcon.src = sessionUserAvatar;
-        sessionUserIcon.style.cssFloat = 'none';
-        sessionUserIcon.style.marginTop = '-1px';
-      }
-
+    sessions.forEach(function(session, ii) {
       if (ii > 0) {
-        if (ii < users.length - 1) {
+        if (ii < sessions.length - 1) {
           sessionHeader.appendChild(document.createTextNode(', '));
         } else {
           sessionHeader.appendChild(document.createTextNode(' and '));
         }
       }
-      if (sessionUserIcon) {
-        sessionHeader.appendChild(sessionUserIcon);
-      }
-      sessionHeader.appendChild(sessionUser);
+      sessionHeader.appendChild(renderSession(session));
     });
-    var verb = users.length === 1 ? 'is' : 'are';
     sessionHeader.appendChild(
-      document.createTextNode(' ' + verb + ' looking at this')
+      document.createTextNode(containerConfig.getMessage(sessions))
     );
     var closedBanner = discussion.querySelector('.closed-banner');
     if (closedBanner) {
-      closedBanner.parentNode.insertBefore(sessionContainer, closedBanner);
+      closedBanner.parentNode.insertBefore(container, closedBanner);
     } else {
-      discussion.appendChild(sessionContainer);
+      var partialMarker = discussion.querySelector('#partial-timeline-marker');
+      if (partialMarker) {
+        partialMarker.parentNode.insertBefore(container, partialMarker);
+      } else {
+        discussion.appendChild(container);
+      }
     }
   } else {
-    if (sessionContainer.parentNode) {
-      sessionContainer.parentNode.removeChild(sessionContainer);
+    if (container.parentNode) {
+      container.parentNode.removeChild(container);
     }
   }
+}
+
+function renderSession(session) {
+  var fragment = document.createDocumentFragment();
+
+  var sessionUserIcon;
+  if (session.avatar) {
+    sessionUserIcon = document.createElement('img');
+    sessionUserIcon.className = 'avatar';
+    sessionUserIcon.alt = '@' + session.user;
+    sessionUserIcon.height = 16;
+    sessionUserIcon.width = 16;
+    sessionUserIcon.src = session.avatar;
+    sessionUserIcon.style.cssFloat = 'none';
+    sessionUserIcon.style.marginTop = '-1px';
+    fragment.appendChild(sessionUserIcon);
+  }
+
+  var sessionUser = document.createElement('a');
+  sessionUser.className = 'author';
+  sessionUser.href = '/' + session.user;
+  sessionUser.appendChild(document.createTextNode(session.user));
+  fragment.appendChild(sessionUser);
+
+  return fragment;
+}
+
+function renderSessions(sessions) {
+  var reading = [];
+  var writing = [];
+  sessions.forEach(function(session) {
+    if (session.isTyping) {
+      writing.push(session);
+    } else {
+      reading.push(session);
+    }
+  });
+
+  renderContainer(reading, {
+    id: 'gh-presence-reading',
+    icon: 'eye',
+    getMessage: function(sessions) {
+      return sessions.length === 1 ?
+        ' is reading this' :
+        ' are reading this';
+    }
+  });
+  renderContainer(writing, {
+    id: 'gh-presence-writing',
+    icon: 'pencil',
+    iconStyle: {
+      color: '#fff',
+      backgroundColor: '#cea61b',
+      paddingLeft: '2px'
+    },
+    getMessage: function(sessions) {
+      return sessions.length === 1 ?
+        ' is typing a comment' :
+        ' are typing comments';
+    }
+  });
 }
 
 function main() {
@@ -180,6 +255,7 @@ function main() {
     session.save({
       user: user.name,
       avatar: user.avatar,
+      isTyping: isTyping(),
       path: path
     });
   };
@@ -205,6 +281,19 @@ function main() {
       }
     }, config.sessionTimeout - config.networkLatency);
   });
+
+  // Keep Parse up-to-date with typing status.
+
+  document.body.addEventListener(
+    'input',
+    debounce(function(event) {
+      var path = getPath();
+      if (path && event.target === getCommentField()) {
+        sessionSave(path);
+      }
+    }, 2500),
+    false
+  );
 
   // Display a list of users on the current path.
 
